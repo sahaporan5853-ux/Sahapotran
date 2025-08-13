@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="bn">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>💬 Chat Home</title>
+<script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
+<style>
+body {margin:0;font-family:Arial,sans-serif;background:#e5ddd5;display:flex;height:100vh;overflow:hidden;}
+#home {width:100%;display:flex;flex-direction:column;}
+#sidebar {width:100%;max-width:400px;margin:auto;background:#075E54;color:#fff;display:flex;flex-direction:column;height:100%;}
+#sidebar h2 {text-align:center;padding:12px 0;border-bottom:1px solid #128C7E;}
+#user-list {flex:1;overflow-y:auto;padding:10px;}
+.user-btn {display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:8px;margin-bottom:6px;background:rgba(255,255,255,.1);cursor:pointer;transition:0.2s;}
+.user-btn:hover {background:rgba(255,255,255,.2);}
+.user-btn img {width:32px;height:32px;border-radius:50%;}
+#chat-view {display:none;flex-direction:column;height:100%;width:100%;max-width:400px;margin:auto;background:#f0f0f0;border-radius:12px;}
+.chat-header {background:#25D366;color:#fff;padding:10px;font-weight:700;display:flex;justify-content:space-between;align-items:center;border-radius:12px 12px 0 0;}
+.chat-body {flex:1;padding:10px;overflow-y:auto;background:#e5ddd5;}
+.msg {padding:6px 10px;border-radius:7px;margin:5px;max-width:70%;word-wrap:break-word;}
+.my-msg {background:#dcf8c6;margin-left:auto;}
+.other-msg {background:white;margin-right:auto;}
+.chat-input {display:flex;padding:8px 10px;gap:5px;border-top:1px solid #ccc;}
+.chat-input input {flex:1;padding:8px 10px;border-radius:20px;border:none;outline:none;}
+.send-btn {background:#25D366;border:none;color:#fff;padding:8px 12px;border-radius:50%;cursor:pointer;font-size:16px;}
+.back-btn {cursor:pointer;font-weight:bold;}
+</style>
+</head>
+<body>
+
+<div id="home">
+  <div id="sidebar">
+    <h2>অনলাইন ইউজার</h2>
+    <div id="user-list"></div>
+  </div>
+</div>
+
+<div id="chat-view">
+  <div class="chat-header">
+    <span id="chat-with">User</span>
+    <span class="back-btn" id="back-btn">⏪ হোম</span>
+  </div>
+  <div class="chat-body" id="chat-body"></div>
+  <div class="chat-input">
+    <input type="text" id="chat-input" placeholder="Type a message...">
+    <button class="send-btn" id="chat-send">➤</button>
+  </div>
+</div>
+
+<script>
+const firebaseConfig = {
+    apiKey: "AIzaSyBBlwLt-VjIyWsev93QJoC6QG5fx9PpTzQ",
+    authDomain: "sahaporan-20c38.firebaseapp.com",
+    databaseURL: "https://sahaporan-20c38-default-rtdb.firebaseio.com",
+    projectId: "sahaporan-20c38",
+    storageBucket: "sahaporan-20c38.firebasestorage.app",
+    messagingSenderId: "52257841743",
+    appId: "1:52257841743:web:48cef728f0d0738d88403a",
+    measurementId: "G-2FGKNQ2168"
+};
+firebase.initializeApp(firebaseConfig);
+const db = firebase.database();
+
+// User
+let username = localStorage.getItem("chat_username");
+let avatar = localStorage.getItem("chat_avatar");
+if (!username) {
+    username = prompt("আপনার নাম লিখুন:");
+    avatar = `https://i.pravatar.cc/150?u=${username}`;
+    localStorage.setItem("chat_username", username);
+    localStorage.setItem("chat_avatar", avatar);
+}
+
+// Online presence
+const userStatusRef = db.ref("onlineUsers/"+username);
+userStatusRef.set({name:username,avatar});
+userStatusRef.onDisconnect().remove();
+
+// Elements
+const userListEl = document.getElementById("user-list");
+const homeEl = document.getElementById("home");
+const chatView = document.getElementById("chat-view");
+const chatWithEl = document.getElementById("chat-with");
+const chatBodyEl = document.getElementById("chat-body");
+const chatInput = document.getElementById("chat-input");
+const chatSendBtn = document.getElementById("chat-send");
+const backBtn = document.getElementById("back-btn");
+
+let currentChatUser = "";
+
+// Load online users
+db.ref("onlineUsers").on("value", snap=>{
+    userListEl.innerHTML="";
+    snap.forEach(child=>{
+        const user = child.val();
+        if(user.name===username) return;
+        const btn=document.createElement("div");
+        btn.className="user-btn";
+        btn.innerHTML=`<img src="${user.avatar}"><span>${user.name}</span>`;
+        btn.onclick = ()=>openChat(user.name);
+        userListEl.appendChild(btn);
+    });
+});
+
+// Open chat
+function openChat(otherName){
+    currentChatUser = otherName;
+    homeEl.style.display="none";
+    chatView.style.display="flex";
+    chatWithEl.textContent = otherName;
+    chatBodyEl.innerHTML="";
+    loadMessages();
+}
+
+// Back to home
+backBtn.onclick = ()=>{
+    chatView.style.display="none";
+    homeEl.style.display="flex";
+    currentChatUser="";
+}
+
+// Send message
+chatSendBtn.onclick = sendMessage;
+chatInput.addEventListener("keypress", e=>{
+    if(e.key==="Enter") sendMessage();
+});
+
+function sendMessage(){
+    const text = chatInput.value.trim();
+    if(!text || !currentChatUser) return;
+    const msgData = {from:username,to:currentChatUser,text,time:new Date().toLocaleTimeString()};
+    db.ref("privateMessages").push(msgData);
+    chatInput.value="";
+}
+
+// Load messages
+function loadMessages(){
+    db.ref("privateMessages").on("value", snap=>{
+        chatBodyEl.innerHTML="";
+        snap.forEach(child=>{
+            const m = child.val();
+            if((m.from===username && m.to===currentChatUser)||(m.from===currentChatUser && m.to===username)){
+                const div = document.createElement("div");
+                div.className = "msg " + (m.from===username ? "my-msg" : "other-msg");
+                div.innerHTML = `${m.text}<br><small>${m.time}</small>`;
+                chatBodyEl.appendChild(div);
+            }
+        });
+        chatBodyEl.scrollTop = chatBodyEl.scrollHeight;
+    });
+}
+</script>
+
+</body>
+</html>
