@@ -3,9 +3,10 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>💬 Chat Home</title>
+<title>💬 Full Chat</title>
 <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-storage-compat.js"></script>
 <style>
 body {margin:0;font-family:Arial,sans-serif;background:#e5ddd5;display:flex;height:100vh;overflow:hidden;}
 #home {width:100%;display:flex;flex-direction:column;}
@@ -21,10 +22,14 @@ body {margin:0;font-family:Arial,sans-serif;background:#e5ddd5;display:flex;heig
 .msg {padding:6px 10px;border-radius:7px;margin:5px;max-width:70%;word-wrap:break-word;}
 .my-msg {background:#dcf8c6;margin-left:auto;}
 .other-msg {background:white;margin-right:auto;}
-.chat-input {display:flex;padding:8px 10px;gap:5px;border-top:1px solid #ccc;}
+.chat-input {display:flex;padding:8px;gap:5px;border-top:1px solid #ccc;align-items:center;}
 .chat-input input {flex:1;padding:8px 10px;border-radius:20px;border:none;outline:none;}
-.send-btn {background:#25D366;border:none;color:#fff;padding:8px 12px;border-radius:50%;cursor:pointer;font-size:16px;}
+.send-btn, #voice-btn {background:#25D366;border:none;color:#fff;padding:8px 12px;border-radius:50%;cursor:pointer;font-size:16px;}
+#emoji-btn {background:transparent;border:none;font-size:20px;cursor:pointer;margin-right:5px;}
+#emoji-panel {position:absolute;bottom:60px;left:10px;background:white;border:1px solid #ccc;padding:5px;border-radius:10px;display:none;flex-wrap:wrap;width:200px;max-height:150px;overflow-y:auto;}
+#emoji-panel span {font-size:20px;cursor:pointer;margin:3px;}
 .back-btn {cursor:pointer;font-weight:bold;}
+#audio-call {margin-left:5px;background:#128C7E;padding:8px 12px;border-radius:50%;color:#fff;cursor:pointer;}
 </style>
 </head>
 <body>
@@ -43,8 +48,12 @@ body {margin:0;font-family:Arial,sans-serif;background:#e5ddd5;display:flex;heig
   </div>
   <div class="chat-body" id="chat-body"></div>
   <div class="chat-input">
+    <button id="emoji-btn">😊</button>
     <input type="text" id="chat-input" placeholder="Type a message...">
     <button class="send-btn" id="chat-send">➤</button>
+    <button id="voice-btn">🎤</button>
+    <button id="audio-call">📞</button>
+    <div id="emoji-panel"></div>
   </div>
 </div>
 
@@ -54,23 +63,19 @@ const firebaseConfig = {
     authDomain: "sahaporan-20c38.firebaseapp.com",
     databaseURL: "https://sahaporan-20c38-default-rtdb.firebaseio.com",
     projectId: "sahaporan-20c38",
-    storageBucket: "sahaporan-20c38.firebasestorage.app",
+    storageBucket: "sahaporan-20c38.appspot.com",
     messagingSenderId: "52257841743",
     appId: "1:52257841743:web:48cef728f0d0738d88403a",
     measurementId: "G-2FGKNQ2168"
 };
 firebase.initializeApp(firebaseConfig);
 const db = firebase.database();
+const storage = firebase.storage();
 
 // User
 let username = localStorage.getItem("chat_username");
 let avatar = localStorage.getItem("chat_avatar");
-if (!username) {
-    username = prompt("আপনার নাম লিখুন:");
-    avatar = `https://i.pravatar.cc/150?u=${username}`;
-    localStorage.setItem("chat_username", username);
-    localStorage.setItem("chat_avatar", avatar);
-}
+if (!username) { username = prompt("আপনার নাম লিখুন:"); avatar = `https://i.pravatar.cc/150?u=${username}`; localStorage.setItem("chat_username", username); localStorage.setItem("chat_avatar", avatar); }
 
 // Online presence
 const userStatusRef = db.ref("onlineUsers/"+username);
@@ -86,10 +91,19 @@ const chatBodyEl = document.getElementById("chat-body");
 const chatInput = document.getElementById("chat-input");
 const chatSendBtn = document.getElementById("chat-send");
 const backBtn = document.getElementById("back-btn");
+const emojiBtn = document.getElementById("emoji-btn");
+const emojiPanel = document.getElementById("emoji-panel");
+const voiceBtn = document.getElementById("voice-btn");
+const audioCallBtn = document.getElementById("audio-call");
 
 let currentChatUser = "";
 
-// Load online users
+// Emoji
+const emojis = ["😀","😂","🤣","😊","😍","😘","😜","😎","🤩","😇","😢","😭","😡","👍","👎","🙏","💪","👏","🙌","🔥","❤️","💔","⭐","✨","🎉"];
+emojis.forEach(e=>{ let span = document.createElement("span"); span.textContent=e; span.onclick=()=>{chatInput.value+=e; emojiPanel.style.display="none";}; emojiPanel.appendChild(span); });
+emojiBtn.onclick=()=>{ emojiPanel.style.display = emojiPanel.style.display==="flex"?"none":"flex"; };
+
+// Load users
 db.ref("onlineUsers").on("value", snap=>{
     userListEl.innerHTML="";
     snap.forEach(child=>{
@@ -114,17 +128,11 @@ function openChat(otherName){
 }
 
 // Back to home
-backBtn.onclick = ()=>{
-    chatView.style.display="none";
-    homeEl.style.display="flex";
-    currentChatUser="";
-}
+backBtn.onclick = ()=>{ chatView.style.display="none"; homeEl.style.display="flex"; currentChatUser=""; }
 
 // Send message
 chatSendBtn.onclick = sendMessage;
-chatInput.addEventListener("keypress", e=>{
-    if(e.key==="Enter") sendMessage();
-});
+chatInput.addEventListener("keypress", e=>{ if(e.key==="Enter") sendMessage(); });
 
 function sendMessage(){
     const text = chatInput.value.trim();
@@ -142,7 +150,7 @@ function loadMessages(){
             const m = child.val();
             if((m.from===username && m.to===currentChatUser)||(m.from===currentChatUser && m.to===username)){
                 const div = document.createElement("div");
-                div.className = "msg " + (m.from===username ? "my-msg" : "other-msg");
+                div.className = "msg " + (m.from===username ? "my-msg":"other-msg");
                 div.innerHTML = `${m.text}<br><small>${m.time}</small>`;
                 chatBodyEl.appendChild(div);
             }
@@ -150,7 +158,47 @@ function loadMessages(){
         chatBodyEl.scrollTop = chatBodyEl.scrollHeight;
     });
 }
-</script>
 
+// Voice message
+let mediaRecorder;
+let audioChunks = [];
+voiceBtn.onclick=async()=>{
+    if(!mediaRecorder || mediaRecorder.state==="inactive"){
+        const stream = await navigator.mediaDevices.getUserMedia({audio:true});
+        mediaRecorder = new MediaRecorder(stream);
+        mediaRecorder.ondataavailable = e=>audioChunks.push(e.data);
+        mediaRecorder.onstop = async ()=>{
+            const blob = new Blob(audioChunks,{type:"audio/webm"});
+            const ref = storage.ref(`voice_${Date.now()}.webm`);
+            await ref.put(blob);
+            const url = await ref.getDownloadURL();
+            const msgData = {from:username,to:currentChatUser,text:`<audio controls src="${url}"></audio>`,time:new Date().toLocaleTimeString()};
+            db.ref("privateMessages").push(msgData);
+            audioChunks=[];
+        };
+        mediaRecorder.start();
+        voiceBtn.textContent="⏹️ Stop";
+    } else if(mediaRecorder.state==="recording"){
+        mediaRecorder.stop();
+        voiceBtn.textContent="🎤";
+    }
+};
+
+// Simple WebRTC audio call (peer-to-peer)
+let localStream;
+let peerConnection;
+const config = {iceServers:[{urls:"stun:stun.l.google.com:19302"}]};
+audioCallBtn.onclick=async()=>{
+    if(peerConnection){ peerConnection.close(); peerConnection=null; return; }
+    localStream = await navigator.mediaDevices.getUserMedia({audio:true});
+    peerConnection = new RTCPeerConnection(config);
+    localStream.getTracks().forEach(track=>peerConnection.addTrack(track,localStream));
+    peerConnection.ontrack = e=>{ const audio = document.createElement("audio"); audio.srcObject=e.streams[0]; audio.autoplay=true; document.body.appendChild(audio); };
+    const offer = await peerConnection.createOffer();
+    await peerConnection.setLocalDescription(offer);
+    // Note: signaling server needed to exchange offer/answer with remote peer
+    alert("WebRTC setup ready. For full audio call, a signaling server is required.");
+};
+</script>
 </body>
 </html>
